@@ -1,0 +1,220 @@
+---
+title: "Google Data Analyst Certificate: Cyclistic Case Study"
+author: "Iram Alexis Salas Roldan"
+date: "6/7/2021"
+output: rmarkdown::github_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo=TRUE)
+```
+
+
+### Introduction ------------------------------------------------------------------------------------------------------------------
+
+This case study follows a fictitional bike-sharing company whose director of marketing is seeking to understand the difference between casual riders and cyclistic members to maximize annual memberships. Understanding their differences could empower the company to convert casual riders into annual members since annual members are much more profitable than casual riders.   
+
+Customers who purchase single-ride or full-day passes are referred to as casual riders. Customers who purchase annual memberships are Cyclistic members.
+
+I am tasked with the following business task. **Find how annual members and casual riders use Cyclistic bikes differently.**
+
+### Preparing the data ------------------------------------------------------------------------------------------------------------
+Historical data from Cyclisitc is used to analyze and identify trends from the following [link](https://divvy-tripdata.s3.amazonaws.com/index.html). The data has been made available by Motivate International INC. under this [license](https://www.divvybikes.com/data-license-agreement).
+
+This analysis required 12 months of historical data. The data is held in individual months so We will gather data starting from April 2020 to March 2021.  
+
+##### Data structure    
+*  **ride_id**: unique trip id.  
+*  **rideable_type**: type of bike used.  
+*  **started_at**: trip start time.  
+*  **ended_at**: trip end time.  
+*  **start_station**: starting station location.  
+*  **Start_station_id**: starting station id.  
+*  **end_station**: ending station location.  
+*  **end_station_id**: ending station id.  
+*  **start_lat**: starting lattitude.  
+*  **start_long**: starting longitude.  
+*  **end_lat**: ending lattitude.  
+*  **end_long**: ending longitude.  
+*  **member_casual**: if trip was made by casual rider or annual member.   
+
+There does not appear to be anything wrong with the data and its integrity can be confirmed since the data was gathered internally by Cyclistic.  
+
+### Processing the data -----------------------------------------------------------------------------------------------------------
+Each monthly dataset was first converted into an Excel Workbook for initial cleaning and data wrangling.
+For each dataset, the following process was done.  
+
+**1.** Add **ride_length** column that will tell the duration of the trip in seconds.  
+**2.** Add **day_of_week** column that will tell on which day the trip began. 1 for Sunday, 2 Monday, 3 Tuesday, 4 Wednesday, 5 Thursday, 6 Friday, and 7 Saturday.  
+**3.** Remove trips with **ride_length** less than 60 seconds. Many trips less than 60 seconds could have been started on accident  
+**4.** Remove trips with missing **end_station** or missing **start_station** values. A trip does not make sense if one of those two values is missing.  
+
+Removal of these trips did not significantly affect the mean ride length of any month.  
+
+SQL Bigquery was then used to merge all 12 datasets together.
+
+Import the necessary packages
+```{r message=FALSE}
+library(dplyr)
+library(ggplot2)
+library(lubridate)
+library(tidyverse)
+```
+
+Import the now merged dataset.
+```{r}
+cyclistic <- read.csv("cyclistic_clean.csv", header=TRUE, sep = ",")
+```
+
+Standardize the column names.
+```{r message=FALSE}
+colnames(cyclistic)
+names(cyclistic)[names(cyclistic) == "ride_id"] <- "trip_id"
+names(cyclistic)[names(cyclistic) == "rideable_type"] <- "bike_id"
+names(cyclistic)[names(cyclistic) == "started_at"] <- "start_time"
+names(cyclistic)[names(cyclistic) == "ended_at"] <- "end_time"
+names(cyclistic)[names(cyclistic) == "member_casual"] <- "user_type"
+```
+
+Inspect the table.  
+```{r message=FALSE}
+colnames(cyclistic) # list of column names
+nrow(cyclistic)     # how many rows of data
+dim(cyclistic)      # dimensions of the dataframe
+str(cyclistic)      # list of columns and datatypes
+summary(cyclistic)  # statistical summary of numeric data
+head(cyclistic)     # see first 6 rows of data
+```
+ 
+Change the data type of **start_time** and **end_time** to datatime.  
+```{r message=FALSE}
+cyclistic[["start_time"]] <- ymd_hms(cyclistic[["start_time"]],tz="America/Chicago")
+cyclistic[["end_time"]] <- ymd_hms(cyclistic[["end_time"]], tz="America/Chicago")
+```
+
+Add columns that list the date, month, day, and year of the trip so that we can group them in the analysis phase.  
+```{r message=FALSE}
+cyclistic$date <- as.Date(cyclistic$start_time) 
+cyclistic$month <- format(as.Date(cyclistic$date), "%m")
+cyclistic$day <- format(as.Date(cyclistic$date), "%d")
+cyclistic$year <- format(as.Date(cyclistic$date), "%Y")
+cyclistic$day_of_week <- format(as.Date(cyclistic$date), "%A")
+```
+
+Update the **ride_length** column.  
+```{r message=FALSE}
+cyclistic$ride_length <- difftime(cyclistic$end_time, cyclistic$start_time, units="secs")
+
+is.numeric(cyclistic$ride_length)
+cyclistic$ride_length <- as.numeric(as.character(cyclistic$ride_length))
+```
+
+### Descriptive Analysis ----------------------------------------------------------------------------------------------------------
+
+Get the min, max, mean, and median of **ride_length** in seconds.  
+```{r}
+summary(cyclistic$ride_length)
+```  
+This tells us that the mean ride length is about 28 minutes, and the median is about 15 minutes. Let us see how ride length differs by user type.  
+
+Compare annual members and casual members.  
+```{r}
+aggregate(cyclistic$ride_length ~ cyclistic$user_type, FUN=mean)
+aggregate(cyclistic$ride_length ~ cyclistic$user_type, FUN=median)
+aggregate(cyclistic$ride_length ~ cyclistic$user_type, FUN=min)
+aggregate(cyclistic$ride_length ~ cyclistic$user_type, FUN=max)
+```  
+It is now clear that casual riders tend to ride for longer amounts of time than annual members do.  
+
+Reorder **day_of_week**.    
+```{r}
+cyclistic$day_of_week <- ordered(cyclistic$day_of_week, levels=c("Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"))
+```
+See the mean ride time by each day for members vs casual users.  
+```{r}
+aggregate(cyclistic$ride_length ~ cyclistic$user_type + cyclistic$day_of_week, FUN=mean)
+
+```  
+Casual riders, on average, ride for longer on every day of the week than do annual members.  
+
+Make a copy of the dataset to makes plots with.  
+```{r}
+cyclistic_v2 <- cyclistic  
+```  
+
+Calculate the mean ride time by each day for members vs casual users.  
+```{r}
+aggregate(cyclistic$ride_length ~ cyclistic$user_type + cyclistic$day_of_week, FUN=mean)
+```
+
+```{r}
+library(ggthemes)
+```
+
+
+Number of rides and duration grouped by user_type and weekday.  
+```{r message=FALSE}
+cyclistic_v2 %>% 
+  mutate(weekday=wday(start_time, label=TRUE)) %>% 
+  group_by(user_type, weekday) %>% 
+  summarise(number_of_rides=n(), average_duration=mean(ride_length)) %>% 
+  arrange(user_type)
+```  
+From this chart we can see that annual members ride consistently throughout the week, while casual riders mostly ride on the weekends. Let us visualize this with a graph.   
+
+```{r message=FALSE,fig.align='center'}
+cyclistic_v2 %>% 
+  mutate(weekday=wday(start_time, label=TRUE)) %>% 
+  group_by(user_type, weekday) %>% 
+  summarise(number_of_rides=n(), average_duration=mean(ride_length)) %>% 
+  arrange(user_type, weekday) %>% 
+  ggplot(aes(x=weekday,y=number_of_rides, fill=user_type)) +
+  geom_col(position="dodge") +
+  labs(title="Number of Rides by Weekday", y="Number of Rides") +
+  theme_economist() + 
+  scale_color_economist() +
+  scale_y_continuous(labels = scales::comma) +
+  theme(legend.title=element_blank(), legend.position="bottom",panel.grid.minor = element_line(colour = "white"))
+```  
+
+This also shows us that members ride more often than casuals and only have less rides by a slight margin on Sundays.
+
+
+```{r message=FALSE,fig.align='center'}
+cyclistic_v2 %>% 
+  mutate(weekday=wday(start_time, label=TRUE)) %>% 
+  group_by(user_type, weekday) %>% 
+  summarise(number_of_rides=n(), average_duration=mean(ride_length)) %>% 
+  arrange(user_type, weekday) %>% 
+  ggplot(aes(x=weekday,y=average_duration, fill=user_type)) +
+  geom_col(position="dodge") +
+  labs(title="Average Ride Length by Weekday", y="Average Ride Length") +
+  theme_economist() + 
+  scale_color_economist() +
+  scale_y_continuous(labels = scales::comma) +
+  theme(legend.title=element_blank(), legend.position="bottom",panel.grid.minor = element_line(colour = "white"))
+```
+
+From this chart we can see that on average, casuals ride longer than members.  
+For more visualizations check out these tableau charts. [Number of rides by month](https://public.tableau.com/views/NumberofRidesbyUserTypeperMonth/MonthvNoofRides?:language=en-US&:display_count=n&:origin=viz_share_link). [Dashboard 1](https://public.tableau.com/views/RideMetricsbyUserTypeandMonthDashboard/Dashboard1?:language=en-US&:display_count=n&:origin=viz_share_link). [Dashboard 2](https://public.tableau.com/views/RideMetricsbyUserTypeandMonthDashboard/Dashboard1?:language=en-US&:display_count=n&:origin=viz_share_link).    
+
+
+### Key insights  
+
+* Casuals on average ride for a longer amount of time, but have a lesser number of rides throughout the week than members
+* Casuals ride mostly in the summer and on the weekends, while members ride more consistently throughout the week and year.
+
+
+### Reccomendations  --------------------------------------------------------------------------------------------------------------
+
+Based on these results with the data made available I have two recommendations that could lead to more annual memberships.  
+
+* Since casual riders are most active during the summer months, I believe that a summer membership could persuade casual riders to then upgrade to the full annual membership.    
+* Similarly, a weekend only pass for Friday, Saturday, and Sunday could also convince causal riders to purchase an annual membership rather than buying a day pass every time.  
+
+
+
+
+
+
+
